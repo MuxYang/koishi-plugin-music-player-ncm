@@ -1,1 +1,8 @@
+node_modules/
+dist/
+.env
+*.log
+data/
 init.md
+search.md
+require.md
