@@ -10,4 +10,25 @@ export default {
   'commands.ncmget.messages.downloading': '正在下载歌曲，请稍候...',
   'commands.ncmget.messages.download-error': '下载失败，请稍后重试',
   'commands.ncmget.messages.send-error': '发送失败，请稍后重试',
+  'commands.ncmget.messages.compressing': '正在压缩音频...',
+  'commands.ncmget.messages.compress-error': '音频压缩失败，将发送原文件',
+  'commands.ncmget.messages.ffmpeg-missing': '压缩功能需要安装 ffmpeg 服务插件',
+
+  _config: {
+    cookie: '网易云音乐 Cookie',
+    bitrate: '音频码率 (bps)',
+    searchTimeout: '搜索超时时间 (秒)',
+    searchPageSize: '搜索结果数量',
+    mergeSearchResults: '合并发送搜索结果',
+    sendFormat: {
+      _description: '发送格式',
+      file: '文件',
+      audio: '语音/音频',
+    },
+    rateLimitEnabled: '启用频率限制',
+    rateLimitInterval: '调用间隔 (秒)',
+    rateLimitGlobal: '全局频率限制',
+    cacheMaxSize: '缓存容量上限 (MB)',
+    cachePath: '缓存路径',
+  },
 }

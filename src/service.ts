@@ -25,7 +25,11 @@ export interface SongUrl {
 export class NcmService extends Service {
   private cookieStore: Record<string, string> = {}
   private http: HTTP
-  
+  /** 最大重试次数 */
+  private readonly maxRetries = 3
+  /** 重试基础延迟（ms） */
+  private readonly retryBaseDelay = 1000
+
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'ncm', true)
     this.http = ctx.http.extend({
@@ -37,10 +41,30 @@ export class NcmService extends Service {
     this.loadCookies()
   }
 
+  /**
+   * 重试执行异步操作（指数退避）
+   */
+  private async withRetry<T>(operation: () => Promise<T>, operationName: string): Promise<T> {
+    let lastError: Error | null = null
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        return await operation()
+      } catch (error) {
+        lastError = error as Error
+        if (attempt < this.maxRetries - 1) {
+          const delay = this.retryBaseDelay * Math.pow(2, attempt)
+          this.ctx.logger('ncm').warn(`${operationName} 失败，${delay}ms后重试 (尝试 ${attempt + 1}/${this.maxRetries})`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
+    }
+    throw lastError
+  }
+
   // 加载cookie配置
   private loadCookies() {
     if (!this.config.cookie) return
-    
+
     try {
       // 支持JSON格式或字符串格式
       if (this.config.cookie.trim().startsWith('[') || this.config.cookie.trim().startsWith('{')) {
@@ -60,7 +84,8 @@ export class NcmService extends Service {
         })
       }
     } catch (e) {
-      this.ctx.logger('ncm').warn('Cookie解析失败:', e)
+      // 避免在日志中输出原始 Cookie 内容
+      this.ctx.logger('ncm').warn('Cookie解析失败，请检查格式是否正确')
     }
   }
 
@@ -84,13 +109,13 @@ export class NcmService extends Service {
   // WEAPI加密
   private weapi(params: any): string {
     const text = JSON.stringify(params)
-    const secKey = Array.from({ length: 16 }, () => 
+    const secKey = Array.from({ length: 16 }, () =>
       'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]
     ).join('')
-    
+
     const encText = this.aesEncrypt(this.aesEncrypt(text, '0CoJUm6Qyw8W8jud'), secKey)
     const encSecKey = this.rsaEncrypt(secKey)
-    
+
     return `params=${encodeURIComponent(encText)}&encSecKey=${encodeURIComponent(encSecKey)}`
   }
 
@@ -131,10 +156,10 @@ export class NcmService extends Service {
       offset
     }
 
-    try {
+    return this.withRetry(async () => {
       const cookie = this.getCookieString()
       const body = this.weapi(params)
-      
+
       const raw = await this.http.post('https://music.163.com/weapi/cloudsearch/get/web', body, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -164,10 +189,7 @@ export class NcmService extends Service {
         duration: song.dt,
         fee: song.fee || 0
       }))
-    } catch (error) {
-      this.ctx.logger('ncm').error('搜索失败:', error)
-      throw error
-    }
+    }, '搜索音乐')
   }
 
   // 获取歌曲播放URL
@@ -178,10 +200,10 @@ export class NcmService extends Service {
       csrf_token: this.cookieStore['__csrf'] || ''
     }
 
-    try {
+    return this.withRetry(async () => {
       const cookie = this.getCookieString()
       const body = this.weapi(params)
-      
+
       const raw = await this.http.post('https://music.163.com/weapi/song/enhance/player/url', body, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -215,20 +237,17 @@ export class NcmService extends Service {
         md5: data.md5,
         type: data.type
       }
-    } catch (error) {
-      this.ctx.logger('ncm').error('获取URL失败:', error)
-      throw error
-    }
+    }, '获取歌曲URL')
   }
 
   // 下载歌曲
   async downloadSong(url: string, savePath: string): Promise<void> {
     try {
-      const response = await this.http.get(url, { 
+      const response = await this.http.get(url, {
         responseType: 'arraybuffer',
-        timeout: 60000 
+        timeout: 60000
       })
-      
+
       await fs.mkdir(path.dirname(savePath), { recursive: true })
       await fs.writeFile(savePath, Buffer.from(response))
     } catch (error) {

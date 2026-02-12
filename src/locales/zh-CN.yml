@@ -12,3 +12,6 @@ commands:
       downloading: 正在下载歌曲，请稍候...
       download-error: 下载失败，请稍后重试
       send-error: 发送失败，请稍后重试
+      compressing: 正在压缩音频...
+      compress-error: 音频压缩失败，将发送原文件
+      ffmpeg-missing: 压缩功能需要安装 ffmpeg 服务插件
