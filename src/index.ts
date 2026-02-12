@@ -250,7 +250,7 @@ export function apply(ctx: Context, config: Config) {
     .alias('网易云')
     .option('audio', '-a 以语音格式发送')
     .option('file', '-f 以文件格式发送')
-    .option('compress', '-z 压缩音频并以语音发送')
+    .option('compress', '-z 全损压缩并以语音发送')
     .action(async ({ session, options }, keyword) => {
       if (!session || !keyword) return session?.text('commands.ncmget.messages.no-keyword')
       if (!ncm) {
@@ -275,9 +275,8 @@ export function apply(ctx: Context, config: Config) {
 
       const sessionKey = getSessionKey(session)
       const forcedSendFormat: Config['sendFormat'] | undefined = (() => {
-        if (compress) return 'audio'
-        if ((options as any).audio) return 'audio'
         if ((options as any).file) return 'file'
+        if (compress || (options as any).audio) return 'audio'
       })()
 
       try {
@@ -442,7 +441,7 @@ export function apply(ctx: Context, config: Config) {
         ? `base64://${(await fs.readFile(filePath)).toString('base64')}`
         : fileUrl
 
-      const format = compress ? 'audio' : (sendFormatOverride ?? config.sendFormat)
+      const format = sendFormatOverride ?? (compress ? 'audio' : config.sendFormat)
 
       try {
         if (format === 'audio') {
