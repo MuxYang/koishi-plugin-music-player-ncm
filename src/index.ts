@@ -240,7 +240,7 @@ export function apply(ctx: Context, config: Config) {
   async function compressAudio(inputPath: string, outputPath: string): Promise<void> {
     await ctx.ffmpeg.builder()
       .input(inputPath)
-      .outputOption('-b:a', '8k', '-ar', '8000', '-ac', '1', '-af', 'volume=5dB')
+      .outputOption('-b:a', '8k', '-ar', '8000', '-ac', '1', '-af', 'volume=30dB')
       .run('file', outputPath)
   }
 
