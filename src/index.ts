@@ -44,6 +44,10 @@ export interface Config {
   rateLimitGlobal: boolean
   cacheMaxSize: number
   cachePath: string
+  compressBitrate: number
+  compressSampleRate: number
+  compressChannels: 1 | 2
+  compressVolumeGain: number
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -61,6 +65,13 @@ export const Config: Schema<Config> = Schema.object({
   rateLimitGlobal: Schema.boolean().default(true).description('全局频率限制'),
   cacheMaxSize: Schema.number().default(1024).description('缓存容量上限 (MB)'),
   cachePath: Schema.string().default('data/ncm-cache').description('缓存路径'),
+  compressBitrate: Schema.number().default(8).description('压缩码率 (kbps)'),
+  compressSampleRate: Schema.number().default(8000).description('压缩采样率 (Hz)'),
+  compressChannels: Schema.union([
+    Schema.const(1).description('单声道'),
+    Schema.const(2).description('双声道'),
+  ]).role('radio').default(1).description('压缩声道数'),
+  compressVolumeGain: Schema.number().default(30).description('压缩音量增益 (dB)'),
 })
 
 export const logger = new Logger('music-player-ncm')
@@ -240,7 +251,12 @@ export function apply(ctx: Context, config: Config) {
   async function compressAudio(inputPath: string, outputPath: string): Promise<void> {
     await ctx.ffmpeg.builder()
       .input(inputPath)
-      .outputOption('-b:a', '8k', '-ar', '8000', '-ac', '1', '-af', 'volume=30dB')
+      .outputOption(
+        '-b:a', `${config.compressBitrate}k`,
+        '-ar', String(config.compressSampleRate),
+        '-ac', String(config.compressChannels),
+        '-af', `volume=${config.compressVolumeGain}dB`,
+      )
       .run('file', outputPath)
   }
 
