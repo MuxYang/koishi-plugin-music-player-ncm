@@ -239,7 +239,7 @@ export function apply(ctx: Context, config: Config) {
       try {
         if (cache.cachePath) await fs.unlink(cache.cachePath)
         await ctx.database.set('ncm_cache', { id: cache.id }, {
-          cached: false, cachePath: null, fileSize: 0,
+          cached: false, cachePath: '', fileSize: 0,
         })
         freedSpace += cache.fileSize || 0
       } catch (e) {
@@ -364,8 +364,10 @@ export function apply(ctx: Context, config: Config) {
           await sendCachedSong(session, cacheEntry, sendFormatOverride, compress)
           return
         } catch {
-          await ctx.database.set('ncm_cache', { id: song.id }, { cached: false, cachePath: null })
-          cacheEntry = undefined
+          await ctx.database.set('ncm_cache', { id: cacheEntry.id }, {
+            cached: false, cachePath: '', fileSize: 0,
+          })
+          // 记录仍存在于数据库中，保留 cacheEntry 标记以便后续走 update 路径
         }
       }
 
@@ -401,34 +403,22 @@ export function apply(ctx: Context, config: Config) {
         await cleanOldCache(urlInfo.size)
         await ncm.downloadSong(urlInfo.url, savePath)
 
-        const cacheUpdateData: Partial<MusicCache> = {
-          name: song.name, artist: song.artist,
-          url: urlInfo.url, cached: true, cachePath: savePath,
-          fileSize: urlInfo.size, cacheTime: Date.now(), bitrate: urlInfo.br,
+        const cacheData: MusicCache = {
+          id: String(song.id),
+          name: song.name,
+          artist: song.artist,
+          url: urlInfo.url,
+          cached: true,
+          cachePath: savePath,
+          fileSize: urlInfo.size,
+          cacheTime: Date.now(),
+          bitrate: urlInfo.br,
         }
 
-        const cacheFullData: MusicCache = {
-          id: song.id, ...cacheUpdateData,
-        } as MusicCache
+        // upsert 自动处理「新增/更新」，彻底避免主键冲突和竞态问题
+        await ctx.database.upsert('ncm_cache', [cacheData])
 
-        // 使用 upsert 避免竞态条件导致的 UNIQUE 约束冲突
-        try {
-          if (cacheEntry) {
-            await ctx.database.set('ncm_cache', { id: song.id }, cacheUpdateData)
-          } else {
-            await ctx.database.create('ncm_cache', cacheFullData)
-          }
-        } catch (error: any) {
-          // 如果是 UNIQUE 约束冲突（由于并发），降级为更新操作
-          if (error?.message?.includes('UNIQUE constraint failed')) {
-            logger.debug('缓存记录已由其他请求创建，执行更新操作')
-            await ctx.database.set('ncm_cache', { id: song.id }, cacheUpdateData)
-          } else {
-            throw error
-          }
-        }
-
-        await sendCachedSong(session, cacheFullData, sendFormatOverride, compress)
+        await sendCachedSong(session, cacheData, sendFormatOverride, compress)
       } catch (error) {
         logger.error('获取歌曲失败:', error)
         await session.send(session.text('commands.ncmget.messages.download-error'))
