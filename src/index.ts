@@ -407,10 +407,21 @@ export function apply(ctx: Context, config: Config) {
           fileSize: urlInfo.size, cacheTime: Date.now(), bitrate: urlInfo.br,
         }
 
-        if (cacheEntry) {
-          await ctx.database.set('ncm_cache', { id: song.id }, cacheData)
-        } else {
-          await ctx.database.create('ncm_cache', cacheData as MusicCache)
+        // 使用 upsert 避免竞态条件导致的 UNIQUE 约束冲突
+        try {
+          if (cacheEntry) {
+            await ctx.database.set('ncm_cache', { id: song.id }, cacheData)
+          } else {
+            await ctx.database.create('ncm_cache', cacheData as MusicCache)
+          }
+        } catch (error: any) {
+          // 如果是 UNIQUE 约束冲突（由于并发），降级为更新操作
+          if (error?.message?.includes('UNIQUE constraint failed')) {
+            logger.debug('缓存记录已由其他请求创建，执行更新操作')
+            await ctx.database.set('ncm_cache', { id: song.id }, cacheData)
+          } else {
+            throw error
+          }
         }
 
         await sendCachedSong(session, cacheData as MusicCache, sendFormatOverride, compress)

@@ -34,8 +34,9 @@ export class NcmService extends Service {
     super(ctx, 'ncm', true)
     this.http = ctx.http.extend({
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Referer': 'https://music.163.com',
+        'X-Real-IP': '116.25.146.177',
       }
     })
     this.loadCookies()
@@ -147,48 +148,97 @@ export class NcmService extends Service {
     return result
   }
 
-  // 搜索音乐
-  async searchMusic(keyword: string, limit: number = 30, offset: number = 0): Promise<SearchResult[]> {
+  private parseSongs(songs: any[]): SearchResult[] {
+    return songs.map((song: any) => ({
+      id: String(song.id),
+      name: song.name,
+      artist: song.ar?.map((a: any) => a.name).join('/') || '未知艺术家',
+      album: song.al?.name || '未知专辑',
+      duration: song.dt,
+      fee: song.fee || 0
+    }))
+  }
+
+  // cloudsearch 搜索
+  private async cloudSearch(keyword: string, limit: number, offset: number): Promise<SearchResult[]> {
     const params = {
       s: keyword,
       type: 1,
       limit,
-      offset
+      offset,
+      total: true,
+      csrf_token: this.cookieStore['__csrf'] || ''
     }
 
+    const cookie = this.getCookieString()
+    const body = this.weapi(params)
+
+    const raw = await this.http.post('https://music.163.com/weapi/cloudsearch/pc', body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(cookie ? { 'Cookie': cookie } : {})
+      }
+    })
+
+    const response = this.unwrapJsonResponse<any>(raw)
+    this.ctx.logger('ncm').debug('cloudsearch 响应:', JSON.stringify(response).substring(0, 500))
+
+    if (!response || typeof response !== 'object') {
+      const preview = typeof response === 'string' ? response.slice(0, 200) : String(response)
+      throw new Error(`搜索失败: 响应格式异常 (${typeof response}) ${preview}`)
+    }
+
+    if (response.code !== 200) {
+      throw new Error(`搜索失败: ${response.message || response.msg || 'code=' + response.code}`)
+    }
+
+    return this.parseSongs(response.result?.songs || [])
+  }
+
+  // 旧版搜索（fallback）
+  private async legacySearch(keyword: string, limit: number, offset: number): Promise<SearchResult[]> {
+    const params = {
+      s: keyword,
+      type: 1,
+      limit,
+      offset,
+      csrf_token: this.cookieStore['__csrf'] || ''
+    }
+
+    const cookie = this.getCookieString()
+    const body = this.weapi(params)
+
+    const raw = await this.http.post('https://music.163.com/weapi/search/get', body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(cookie ? { 'Cookie': cookie } : {})
+      }
+    })
+
+    const response = this.unwrapJsonResponse<any>(raw)
+    this.ctx.logger('ncm').debug('legacy search 响应:', JSON.stringify(response).substring(0, 500))
+
+    if (!response || typeof response !== 'object') {
+      const preview = typeof response === 'string' ? response.slice(0, 200) : String(response)
+      throw new Error(`搜索失败: 响应格式异常 (${typeof response}) ${preview}`)
+    }
+
+    if (response.code !== 200) {
+      throw new Error(`搜索失败: ${response.message || response.msg || 'code=' + response.code}`)
+    }
+
+    return this.parseSongs(response.result?.songs || [])
+  }
+
+  // 搜索音乐（cloudsearch 失败时自动降级到旧版搜索）
+  async searchMusic(keyword: string, limit: number = 30, offset: number = 0): Promise<SearchResult[]> {
     return this.withRetry(async () => {
-      const cookie = this.getCookieString()
-      const body = this.weapi(params)
-
-      const raw = await this.http.post('https://music.163.com/weapi/cloudsearch/get/web', body, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          ...(cookie ? { 'Cookie': cookie } : {})
-        }
-      })
-
-      const response = this.unwrapJsonResponse<any>(raw)
-
-      this.ctx.logger('ncm').debug('搜索响应:', JSON.stringify(response).substring(0, 500))
-
-      if (!response || typeof response !== 'object') {
-        const preview = typeof response === 'string' ? response.slice(0, 200) : String(response)
-        throw new Error(`搜索失败: 响应格式异常 (${typeof response}) ${preview}`)
+      try {
+        return await this.cloudSearch(keyword, limit, offset)
+      } catch (e) {
+        this.ctx.logger('ncm').warn(`cloudsearch 失败，降级到旧版搜索: ${(e as Error).message}`)
+        return await this.legacySearch(keyword, limit, offset)
       }
-
-      if (response.code !== 200) {
-        throw new Error(`搜索失败: ${response.message || response.msg || 'code=' + response.code}`)
-      }
-
-      const songs = response.result?.songs || []
-      return songs.map((song: any) => ({
-        id: String(song.id),
-        name: song.name,
-        artist: song.ar?.map((a: any) => a.name).join('/') || '未知艺术家',
-        album: song.al?.name || '未知专辑',
-        duration: song.dt,
-        fee: song.fee || 0
-      }))
     }, '搜索音乐')
   }
 
